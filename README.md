@@ -1,51 +1,81 @@
-# AI Riddle Generator - Hệ Thống Tạo Câu Đố Tư Duy Cho Trẻ Em
+# AI Riddle Generator - React.js (AWS Amplify)
 
-Ứng dụng web Single Page Application (SPA) đơn giản, tinh gọn và đẹp mắt sử dụng Trí Tuệ Nhân Tạo (AI) để chuyển đổi từ khóa đáp án thành các câu đố học thuật (Lịch sử, Văn học, Khoa học) hoặc mật mã chữ đầu (Acrostic) nhằm phát triển trí não cho học sinh Cấp 1 & Cấp 2.
-
-Dự án được chuẩn bị sẵn cấu trúc Serverless để kết nối trực tiếp với các dịch vụ đám mây của **Amazon Web Services (AWS)**.
+Ứng dụng web được lập trình bằng **React.js (Vite)** dùng để tạo câu đố tư duy và mật mã chữ đầu (Acrostic) cho trẻ em. Dự án được tối ưu hóa cấu trúc để sẵn sàng triển khai tự động lên **AWS Amplify Console** và tích hợp trực tiếp với cơ sở dữ liệu **DynamoDB Single-Table Design**.
 
 ---
 
-## 📂 Cấu trúc Thư mục Dự án
+## 📂 Cấu trúc Thư mục
 
 ```
 AI_Riddle_Generator/
-├── index.html              # Trang giao diện chính (Single Page Application layout)
-├── style.css               # Giao diện Glassmorphism hiện đại, Dark Mode & cấu hình in PDF
-├── README.md               # Hướng dẫn này
-└── js/
-    ├── app.js              # Xử lý các sự kiện click, định tuyến tab, LocalStorage và Print
-    ├── database.js         # Dữ liệu câu đố cộng đồng và bộ sinh mô phỏng AI (Mock Generator)
-    └── aws-guide.js        # Hướng dẫn chi tiết thiết lập AWS & Code Lambda mẫu
+├── amplify.yml             # Cấu hình build CI/CD tự động của AWS Amplify
+├── package.json            # Khai báo thư viện React và tập lệnh build
+├── vite.config.js          # Cấu hình biên dịch Vite
+├── index.html              # Điểm neo ứng dụng
+└── src/
+    ├── main.jsx            # Khởi tạo React root
+    ├── App.jsx             # Router chính, quản lý Theme và IAM profiles
+    ├── index.css           # Cấu hình giao diện Glassmorphism và Dark Mode
+    ├── data/
+    │   ├── db.js           # Client giả lập Single-Table DynamoDB (UserProfile, Riddle, Upvote)
+    │   └── aws-guide.js    # Tài liệu cấu hình AWS & Code Lambda mẫu
+    └── components/
+        ├── Header.jsx      # Thanh menu, Identity switcher và Theme toggle
+        ├── Generator.jsx   # Khung sinh câu đố với AI & cơ chế gợi ý 2 bước
+        ├── Community.jsx   # Kho câu đố cộng đồng (GSI1 Index) & Kiểm soát Upvote
+        ├── Library.jsx     # Kho lưu trữ câu đố cá nhân (Query PK) & Xuất PDF
+        └── DeveloperHub.jsx# Dashboard hiển thị mã nguồn và hướng dẫn setup AWS
 ```
 
 ---
 
-## ⚙️ Hướng dẫn Khởi chạy Giao diện Cục bộ (Local Run)
+## ⚙️ Hướng dẫn Chạy Cục bộ (Local Development)
 
-Vì ứng dụng được xây dựng hoàn toàn bằng **HTML5, CSS3 và Javascript (ES Modules)** nguyên bản, bạn có hai cách cực kỳ đơn giản để chạy thử nghiệm:
+Yêu cầu máy cài đặt sẵn **Node.js 18+**.
 
-### Cách 1: Sử dụng Liveserver (Khuyên Dùng)
-Do JS sử dụng ES Modules (`type="module"`), trình duyệt yêu cầu chạy tệp từ một Web Server cục bộ thay vì nhấp đúp trực tiếp vào file.
-1. Nếu dùng **VS Code**, hãy cài đặt extension **Live Server**.
-2. Nhấp chuột phải vào `index.html` và chọn **Open with Live Server**.
-3. Ứng dụng sẽ tự động chạy tại cổng `http://127.0.0.1:5500`.
-
-### Cách 2: Khởi chạy Máy chủ Cục bộ qua Python
-Nếu máy bạn đã cài sẵn Python:
-1. Mở cửa sổ terminal/command prompt tại thư mục dự án `D:\Thuc Tap AWS\du an\project-nhom\AI_Riddle_Generator`.
-2. Chạy lệnh:
+1. Cài đặt các gói phụ thuộc:
    ```bash
-   python -m http.server 8000
+   npm install
    ```
-3. Mở trình duyệt và truy cập: `http://localhost:8000`.
+
+2. Khởi chạy máy chủ phát triển cục bộ:
+   ```bash
+   npm run dev
+   ```
+
+3. Mở trình duyệt và truy cập đường dẫn hiển thị (thường là `http://localhost:5173`).
 
 ---
 
-## ☁️ Tích hợp Dịch vụ đám mây AWS (Serverless Setup Roadmap)
+## ☁️ Cấu hình Triển khai AWS Amplify
 
-Ứng dụng được thiết kế để kết nối trực tiếp với AWS. Trong tab **AWS Developer Hub** tích hợp trực tiếp trên giao diện ứng dụng, chúng tôi đã chuẩn bị:
-1. **Sơ đồ luồng kiến trúc (Architecture Map):** Phối hợp các dịch vụ S3, CloudFront, API Gateway, Lambda, DynamoDB và Amazon Bedrock.
-2. **Mã nguồn AWS Lambda (Python):** Viết sẵn hàm xử lý để gửi câu lệnh chỉ thị (System Prompts) lên Bedrock (Claude 3.5 Sonnet) để sinh câu đố chuẩn hóa dạng JSON và lưu vết vào DynamoDB.
-3. **Mẫu kết nối RESTful API:** Đoạn code Javascript giúp bạn thay thế cơ chế sinh câu đố mô phỏng bằng API Gateway thực tế.
-4. **Hướng dẫn cấu hình CORS:** Hướng dẫn chi tiết cách cấu hình API Gateway để tránh các lỗi bảo mật chặn CORS khi gọi từ trình duyệt.
+Dự án đã có tệp `amplify.yml` cấu hình sẵn các bước build. Để đưa dự án lên Cloud:
+
+1. Đẩy mã nguồn của bạn lên một kho lưu trữ **GitHub** (hoặc GitLab / Bitbucket).
+2. Truy cập **AWS Amplify Console** trên tài khoản AWS của bạn.
+3. Nhấp **Create new app** -> Chọn nguồn Git tương ứng và liên kết repo.
+4. Amplify sẽ tự động nhận diện cấu hình `amplify.yml` và tiến hành biên dịch ứng dụng React thành mã tĩnh để phân phối qua hệ thống CDN của AWS.
+
+---
+
+## 📊 Mô hình Single-Table DynamoDB được sử dụng
+
+Ứng dụng giả lập chuẩn cấu trúc Single-Table Design trong DynamoDB:
+
+1. **User Profile (Hồ sơ):**
+   - **PK:** `USER#<UserId>` (Ví dụ: `USER#u102`)
+   - **SK:** `PROFILE`
+   - **Attributes:** `EntityType` ("USER"), `Email`, `Role` ("Teacher" | "Parent"), `CreatedAt`
+
+2. **Riddle (Câu đố):**
+   - **PK:** `USER#<CreatorUserId>`
+   - **SK:** `RIDDLE#<GENRE>#<RiddleId>`
+   - **GSI1PK (Khóa chỉ mục phụ):** `FEATURED#<GENRE>`
+   - **GSI1SK (Sắp xếp chỉ mục phụ):** `<Upvotes>` (Dùng để sắp xếp câu đố nổi bật từ cao xuống thấp)
+   - **Attributes:** `riddle_id`, `keyword`, `age_group`, `genre`, `riddle_content`, `hints` (array), `upvotes`, `created_at`
+
+3. **Upvote (Kiểm soát lượt vote):**
+   - **PK:** `USER#<VoterUserId>`
+   - **SK:** `UPVOTE#<RiddleId>`
+   - **Attributes:** `EntityType` ("UPVOTE"), `Timestamp`
+   - *Logic nghiệp vụ:* Trước khi cho phép cộng lượt upvote, hệ thống sẽ thực hiện kiểm tra điều kiện bản ghi `UPVOTE` để đảm bảo mỗi tài khoản chỉ được vote một lần duy nhất.
