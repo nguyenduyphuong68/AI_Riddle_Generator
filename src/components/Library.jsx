@@ -22,8 +22,8 @@ export default function Library({ libraryRiddles, onDeleteRiddle }) {
                     const fileURL = URL.createObjectURL(result);
                     window.open(fileURL, '_blank');
                     return;
-                } else if (result && typeof result === 'object' && result.export_url) {
-                    window.open(result.export_url, '_blank');
+                } else if (result && typeof result === 'object' && result.download_url) {
+                    window.open(result.download_url, '_blank');
                     return;
                 } else if (result && typeof result === 'object' && result.rendered_html) {
                     // If the backend returns HTML code to display
