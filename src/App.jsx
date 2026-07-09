@@ -13,7 +13,7 @@ export default function App() {
 
     // Cognito Authentication States
     const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [currentUserId, setCurrentUserId] = useState('u102');
+    const [currentUserId, setCurrentUserId] = useState('usr_123456');
 
     // Local DB States (reactively sync with LocalStorage DynamoDB simulator)
     const [riddles, setRiddles] = useState([]);

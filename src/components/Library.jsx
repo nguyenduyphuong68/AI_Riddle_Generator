@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { APIService } from '../data/api';
 
 export default function Library({ libraryRiddles, onDeleteRiddle }) {
     const [openReveals, setOpenReveals] = useState({});
@@ -11,9 +12,39 @@ export default function Library({ libraryRiddles, onDeleteRiddle }) {
         }));
     };
 
-    const handlePrintSingle = (riddle) => {
+    const handlePrintSingle = async (riddle) => {
+        try {
+            if (APIService.isConfigured()) {
+                console.log("Triggering backend /riddles/export endpoint...");
+                const result = await APIService.exportRiddle(riddle);
+                
+                if (result instanceof Blob) {
+                    const fileURL = URL.createObjectURL(result);
+                    window.open(fileURL, '_blank');
+                    return;
+                } else if (result && typeof result === 'object' && result.export_url) {
+                    window.open(result.export_url, '_blank');
+                    return;
+                } else if (result && typeof result === 'object' && result.rendered_html) {
+                    // If the backend returns HTML code to display
+                    const printWindow = window.open('', '_blank');
+                    printWindow.document.write(result.rendered_html);
+                    printWindow.document.close();
+                    return;
+                }
+            }
+        } catch (err) {
+            console.error("Export API failed, falling back to local layout rendering:", err);
+        }
+
+        // Fallback to local HTML generation for printing
         const printWindow = window.open('', '_blank');
-        const htmlContent = riddle.riddle_content.replace(/\n/g, '<br/>');
+        const riddleText = riddle.content?.raw_text || riddle.riddle_content || '';
+        const htmlContent = riddleText.replace(/\n/g, '<br/>');
+        const genreLabel = translateGenre(riddle.metadata?.genre || riddle.genre);
+        const ageLabel = riddle.metadata?.age_group || riddle.age_group;
+        const hint1Text = riddle.content?.hints?.[0] || riddle.hints?.[0] || 'Không có gợi ý';
+        const hint2Text = riddle.content?.hints?.[1] || riddle.hints?.[1] || hint1Text;
 
         printWindow.document.write(`
             <!DOCTYPE html>
@@ -81,10 +112,10 @@ export default function Library({ libraryRiddles, onDeleteRiddle }) {
                 </head>
                 <body>
                     <div class="riddle-card">
-                        <div class="header">AI Riddle Generator &nbsp;•&nbsp; ${riddle.genre} &nbsp;•&nbsp; ${riddle.age_group}</div>
+                        <div class="header">AI Riddle Generator &nbsp;•&nbsp; ${genreLabel} &nbsp;•&nbsp; ${ageLabel}</div>
                         <div class="riddle-text">${htmlContent}</div>
-                        <div class="hint-block"><strong>Gợi ý 1:</strong> ${riddle.hints[0]}</div>
-                        <div class="hint-block"><strong>Gợi ý 2:</strong> ${riddle.hints[1] || riddle.hints[0]}</div>
+                        <div class="hint-block"><strong>Gợi ý 1:</strong> ${hint1Text}</div>
+                        <div class="hint-block"><strong>Gợi ý 2:</strong> ${hint2Text}</div>
                         <div class="answer-container">
                             <div style="font-size: 9pt; color: #9ca3af; margin-bottom: 4px;">ĐÁP ÁN:</div>
                             <div class="answer-badge">${riddle.keyword}</div>
@@ -128,18 +159,24 @@ export default function Library({ libraryRiddles, onDeleteRiddle }) {
             ) : (
                 <div className="cards-grid">
                     {libraryRiddles.map((riddle) => {
+                        const riddleContentText = riddle.content?.raw_text || riddle.riddle_content;
                         return (
                             <div key={riddle.riddle_id} className="glass-panel riddle-card">
                                 <div className="card-header">
                                     <div className="tag-list">
-                                        <span className="badge tag-primary">{translateGenre(riddle.genre)}</span>
-                                        <span className="badge tag-accent">{riddle.age_group}</span>
+                                        <span className="badge tag-primary">{translateGenre(riddle.metadata?.genre || riddle.genre)}</span>
+                                        <span className="badge tag-accent">{riddle.metadata?.age_group || riddle.age_group}</span>
+                                        {(riddle.metadata?.topic) && (
+                                            <span className="badge tag-info" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                                                📚 {riddle.metadata.topic}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
 
                                 <div className="card-body">
                                     <div className="card-riddle-preview">
-                                         {riddle.riddle_content}
+                                         {riddleContentText}
                                      </div>
 
                                     {/* Clues & Answer reveals */}
@@ -156,7 +193,7 @@ export default function Library({ libraryRiddles, onDeleteRiddle }) {
                                                 className="reveal-content"
                                                 style={{ maxHeight: openReveals[`${riddle.riddle_id}_hint1`] ? '120px' : '0' }}
                                             >
-                                                {riddle.hints[0]}
+                                                {riddle.content?.hints?.[0] || riddle.hints?.[0]}
                                             </div>
                                         </div>
 
@@ -172,7 +209,7 @@ export default function Library({ libraryRiddles, onDeleteRiddle }) {
                                                 className="reveal-content"
                                                 style={{ maxHeight: openReveals[`${riddle.riddle_id}_hint2`] ? '120px' : '0' }}
                                             >
-                                                {riddle.hints[1] || riddle.hints[0]}
+                                                {riddle.content?.hints?.[1] || riddle.hints?.[1] || riddle.content?.hints?.[0] || riddle.hints?.[0]}
                                             </div>
                                         </div>
 

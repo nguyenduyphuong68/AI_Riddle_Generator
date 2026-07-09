@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { generateMockRiddleText } from '../data/db';
+import { APIService } from '../data/api';
 
-export default function Generator({ onSaveRiddle }) {
+export default function Generator({ currentUserId, onSaveRiddle, isLoggedIn, onRequireLogin }) {
     const [keyword, setKeyword] = useState('');
     const [ageGroup, setAgeGroup] = useState('Cấp 1');
     const [genre, setGenre] = useState('Acrostic');
+    const [topic, setTopic] = useState('Địa lý');
     const [lang, setLang] = useState('vi');
     
     // UI States
@@ -20,7 +22,7 @@ export default function Generator({ onSaveRiddle }) {
         answer: false
     });
 
-    const handleGenerate = (e) => {
+    const handleGenerate = async (e) => {
         e.preventDefault();
         
         setWelcome(false);
@@ -29,22 +31,41 @@ export default function Generator({ onSaveRiddle }) {
         setSaved(false);
         setReveals({ hint1: false, hint2: false, answer: false });
 
-        // Simulate AI loading duration (1.2 seconds)
-        setTimeout(() => {
-            const rawRiddle = generateMockRiddleText(keyword, ageGroup, genre, lang);
-            
-            const structuredRiddle = {
-                keyword: rawRiddle.keyword || keyword,
-                age_group: ageGroup,
-                genre: genre,
-                riddle_content: rawRiddle.riddle_content,
-                hints: rawRiddle.hints || ["Không có gợi ý"],
-                lang: lang
-            };
+        const payload = {
+            keyword: keyword,
+            age_group: ageGroup,
+            genre: genre,
+            topic: topic,
+            language: lang,
+            user_id: currentUserId,
+            creator_role: isLoggedIn ? 'User' : 'Guest'
+        };
 
-            setRiddle(structuredRiddle);
-            setLoading(false);
-        }, 1200);
+        try {
+            if (APIService.isConfigured()) {
+                console.log("Calling API Gateway: ", APIService.getApiUrl());
+                const response = await APIService.generateRiddle(payload);
+                setRiddle(response);
+            } else {
+                console.warn("API is not configured, running local mock.");
+                // Fallback to local simulator with delay
+                setTimeout(() => {
+                    const localRiddle = generateMockRiddleText(keyword, ageGroup, genre, lang, topic);
+                    setRiddle(localRiddle);
+                    setLoading(false);
+                }, 1000);
+                return;
+            }
+        } catch (err) {
+            console.error("API call failed, falling back to local simulation:", err);
+            setTimeout(() => {
+                const localRiddle = generateMockRiddleText(keyword, ageGroup, genre, lang, topic);
+                setRiddle(localRiddle);
+                setLoading(false);
+            }, 1000);
+            return;
+        }
+        setLoading(false);
     };
 
     const toggleReveal = (key) => {
@@ -56,6 +77,11 @@ export default function Generator({ onSaveRiddle }) {
 
     const handleSave = () => {
         if (!riddle || saved) return;
+        if (!isLoggedIn) {
+            const accept = window.confirm("Bạn cần đăng nhập để lưu câu đố này vào thư viện cá nhân. Đăng nhập ngay?");
+            if (accept) onRequireLogin();
+            return;
+        }
         onSaveRiddle(riddle);
         setSaved(true);
     };
@@ -93,6 +119,24 @@ export default function Generator({ onSaveRiddle }) {
                                 onChange={(e) => setKeyword(e.target.value)}
                                 required
                             />
+                        </div>
+
+                        {/* Topic selection dropdown */}
+                        <div className="form-group">
+                            <label htmlFor="topic-select" className="form-label">Chủ đề câu đố (Topic)</label>
+                            <select 
+                                id="topic-select"
+                                className="form-input"
+                                value={topic}
+                                onChange={(e) => setTopic(e.target.value)}
+                                style={{ fontWeight: 600 }}
+                            >
+                                <option value="Địa lý">🗺️ Địa lý</option>
+                                <option value="Lịch sử">📜 Lịch sử</option>
+                                <option value="Văn học">📚 Văn học</option>
+                                <option value="Toán học">📐 Toán học</option>
+                                <option value="Khoa học">🧪 Khoa học</option>
+                            </select>
                         </div>
                         
                         {/* Age group */}
@@ -201,13 +245,13 @@ export default function Generator({ onSaveRiddle }) {
                         <div className="riddle-display-wrapper">
                             <div className="riddle-metadata-row">
                                 <div className="riddle-metadata-badge">
-                                    🏷️ {translateGenre(riddle.genre)} &nbsp;•&nbsp; 🎓 {riddle.age_group} &nbsp;•&nbsp; 🌐 {riddle.lang.toUpperCase()}
+                                    🏷️ {translateGenre(riddle.metadata?.genre)} &nbsp;•&nbsp; 🎓 {riddle.metadata?.age_group} &nbsp;•&nbsp; 🌐 {riddle.metadata?.language?.toUpperCase()} &nbsp;•&nbsp; 📚 {riddle.metadata?.topic}
                                 </div>
                             </div>
                             
                             <div className="riddle-content-block">
                                 <div className="riddle-text">
-                                    {riddle.riddle_content}
+                                    {riddle.content?.raw_text}
                                 </div>
                             </div>
                             
@@ -219,7 +263,7 @@ export default function Generator({ onSaveRiddle }) {
                                         <span className="reveal-trigger-arrow">▼</span>
                                     </button>
                                     <div className="reveal-content" style={{ maxHeight: reveals.hint1 ? '200px' : '0' }}>
-                                        {riddle.hints[0]}
+                                        {riddle.content?.hints?.[0]}
                                     </div>
                                 </div>
                                 
@@ -229,7 +273,7 @@ export default function Generator({ onSaveRiddle }) {
                                         <span className="reveal-trigger-arrow">▼</span>
                                     </button>
                                     <div className="reveal-content" style={{ maxHeight: reveals.hint2 ? '200px' : '0' }}>
-                                        {riddle.hints[1] || riddle.hints[0]}
+                                        {riddle.content?.hints?.[1] || riddle.content?.hints?.[0]}
                                     </div>
                                 </div>
                                 
