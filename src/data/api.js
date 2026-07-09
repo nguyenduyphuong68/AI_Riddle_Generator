@@ -1,5 +1,5 @@
 /* ==========================================================================
-   AI Riddle Generator - AWS API Gateway Fetch Client Service (Amplify BaseUrl)
+   AI Riddle Generator - AWS API Gateway Fetch Client Service (Robust Proxy Guard)
    ========================================================================== */
 
 // Base Stage URL (e.g. "https://44vwnl4k95.execute-api.ap-southeast-1.amazonaws.com/dev")
@@ -47,8 +47,22 @@ export const APIService = {
             throw new Error(`API Gateway error! Status: ${response.status}`);
         }
 
-        const result = await response.json();
+        let result = await response.json();
         console.log("API Gateway Response:", result);
+
+        // Safeguard: If "Use Lambda Proxy Integration" is OFF in API Gateway
+        if (result && typeof result === 'object' && result.statusCode !== undefined && result.body !== undefined) {
+            console.warn("Lambda Proxy Integration is disabled on API Gateway. Unwrapping nested response...");
+            
+            const nestedStatus = Number(result.statusCode);
+            const nestedBody = JSON.parse(result.body || '{}');
+            
+            if (nestedStatus >= 400) {
+                throw new Error(nestedBody.message || `API error with status ${nestedStatus}`);
+            }
+            result = nestedBody;
+        }
+
         return result;
     },
 
@@ -71,8 +85,22 @@ export const APIService = {
             throw new Error(`API Gateway export error! Status: ${response.status}`);
         }
 
-        const result = await response.json();
+        let result = await response.json();
         console.log("Export API Response:", result);
+
+        // Safeguard: If "Use Lambda Proxy Integration" is OFF in API Gateway
+        if (result && typeof result === 'object' && result.statusCode !== undefined && result.body !== undefined) {
+            console.warn("Lambda Proxy Integration is disabled on API Gateway. Unwrapping nested response...");
+            
+            const nestedStatus = Number(result.statusCode);
+            const nestedBody = JSON.parse(result.body || '{}');
+            
+            if (nestedStatus >= 400) {
+                throw new Error(nestedBody.message || `API error with status ${nestedStatus}`);
+            }
+            result = nestedBody;
+        }
+
         return result;
     }
 };
