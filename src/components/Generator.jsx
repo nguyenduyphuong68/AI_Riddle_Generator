@@ -48,7 +48,6 @@ export default function Generator({ currentUserId, onSaveRiddle, isLoggedIn, onR
                 setRiddle(response);
             } else {
                 console.warn("API is not configured, running local mock.");
-                // Fallback to local simulator with delay
                 setTimeout(() => {
                     const localRiddle = generateMockRiddleText(keyword, ageGroup, genre, lang, topic);
                     setRiddle(localRiddle);
@@ -86,13 +85,133 @@ export default function Generator({ currentUserId, onSaveRiddle, isLoggedIn, onR
         setSaved(true);
     };
 
+    const handlePrintSingle = async (riddleItem) => {
+        try {
+            if (APIService.isConfigured()) {
+                console.log("Triggering backend /riddles/export endpoint from generator...");
+                const result = await APIService.exportRiddle(riddleItem);
+                
+                if (result instanceof Blob) {
+                    const fileURL = URL.createObjectURL(result);
+                    window.open(fileURL, '_blank');
+                    return;
+                } else if (result && typeof result === 'object' && result.export_url) {
+                    window.open(result.export_url, '_blank');
+                    return;
+                } else if (result && typeof result === 'object' && result.rendered_html) {
+                    const printWindow = window.open('', '_blank');
+                    printWindow.document.write(result.rendered_html);
+                    printWindow.document.close();
+                    return;
+                }
+            }
+        } catch (err) {
+            console.error("Export API failed, falling back to local layout rendering:", err);
+        }
+
+        // Fallback to local HTML generation for printing
+        const printWindow = window.open('', '_blank');
+        const riddleText = riddleItem.content?.raw_text || riddleItem.riddle_content || '';
+        const htmlContent = riddleItem.content?.rendered_html || riddleText.replace(/\n/g, '<br/>');
+        const genreLabel = translateGenre(riddleItem.metadata?.genre || riddleItem.genre);
+        const ageLabel = riddleItem.metadata?.age_group || riddleItem.age_group;
+        const hint1Text = riddleItem.content?.hints?.[0] || riddleItem.hints?.[0] || 'Không có gợi ý';
+        const hint2Text = riddleItem.content?.hints?.[1] || riddleItem.hints?.[1] || hint1Text;
+
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+                <head>
+                    <title>AI Riddle - ${riddleItem.keyword}</title>
+                    <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@600;700&family=Plus+Jakarta+Sans:wght@500;700&display=swap" rel="stylesheet">
+                    <style>
+                        body {
+                            font-family: 'Plus Jakarta Sans', sans-serif;
+                            padding: 2cm;
+                            background: white;
+                            color: #1f2937;
+                        }
+                        .riddle-card {
+                            border: 2px solid #7c3aed;
+                            border-radius: 16px;
+                            padding: 1.5cm;
+                            max-width: 15cm;
+                            margin: 0 auto;
+                            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+                        }
+                        .header {
+                            font-size: 9pt;
+                            text-transform: uppercase;
+                            color: #7c3aed;
+                            font-weight: 700;
+                            margin-bottom: 0.5cm;
+                            border-bottom: 1px solid #7c3aed;
+                            padding-bottom: 0.2cm;
+                        }
+                        .riddle-text {
+                            font-family: 'Quicksand', sans-serif;
+                            font-size: 16pt;
+                            line-height: 1.8;
+                            color: #4c1d95;
+                            margin-bottom: 1cm;
+                            text-align: center;
+                        }
+                        .hint-block {
+                            border-top: 1px dashed #ccc;
+                            margin-top: 0.5cm;
+                            padding-top: 0.3cm;
+                            font-size: 10.5pt;
+                            color: #4b5563;
+                            line-height: 1.5;
+                        }
+                        .answer-container {
+                            margin-top: 1cm;
+                            text-align: center;
+                        }
+                        .answer-badge {
+                            display: inline-block;
+                            border: 2px solid #fbbf24;
+                            background-color: #fffbeb;
+                            color: #d97706;
+                            padding: 0.3cm 1cm;
+                            font-size: 13pt;
+                            font-weight: 800;
+                            border-radius: 6px;
+                            text-transform: uppercase;
+                            letter-spacing: 0.05em;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="riddle-card">
+                        <div class="header">AI Riddle Generator &nbsp;•&nbsp; ${genreLabel} &nbsp;•&nbsp; ${ageLabel}</div>
+                        <div class="riddle-text">${htmlContent}</div>
+                        <div class="hint-block"><strong>Gợi ý 1:</strong> ${hint1Text}</div>
+                        <div class="hint-block"><strong>Gợi ý 2:</strong> ${hint2Text}</div>
+                        <div class="answer-container">
+                            <div style="font-size: 9pt; color: #9ca3af; margin-bottom: 4px;">ĐÁP ÁN:</div>
+                            <div class="answer-badge">${riddleItem.keyword}</div>
+                        </div>
+                    </div>
+                    <script>
+                        window.onload = function() {
+                            window.print();
+                            setTimeout(function() { window.close(); }, 500);
+                        }
+                    </script>
+                </body>
+            </html>
+        `);
+        printWindow.document.close();
+    };
+
     const translateGenre = (g) => {
         switch (g) {
-            case 'History-Lit': return '📜 Lịch sử - Văn học';
-            case 'Acrostic': return '🔠 Mật mã chữ đầu';
-            case 'Modern-Meme': return '⚡ Meme - Trẻ trung';
-            case 'Music-Art': return '🎨 Nghệ thuật - Nhạc';
-            case 'Science-Math': return '📐 Khoa học - Toán';
+            case 'History-Lit': return '📜 Thơ tự sự / Văn xuôi';
+            case 'Acrostic': return '🔠 Mật mã chữ đầu (Acrostic)';
+            case 'Modern-Meme': return '⚡ Câu đố dí dỏm / Meme';
+            case 'Music-Art': return '🎨 Nghệ thuật & Âm nhạc';
+            case 'Science-Math': return '📐 Đố vui logic / Hình ảnh';
             default: return '🧩 Câu đố';
         }
     };
@@ -123,7 +242,7 @@ export default function Generator({ currentUserId, onSaveRiddle, isLoggedIn, onR
 
                         {/* Topic selection dropdown */}
                         <div className="form-group">
-                            <label htmlFor="topic-select" className="form-label">Chủ đề câu đố (Topic)</label>
+                            <label htmlFor="topic-select" className="form-label">Chủ đề kiến thức (Topic)</label>
                             <select 
                                 id="topic-select"
                                 className="form-input"
@@ -166,14 +285,14 @@ export default function Generator({ currentUserId, onSaveRiddle, isLoggedIn, onR
                         
                         {/* Genre selection */}
                         <div className="form-group">
-                            <label className="form-label">Thể loại câu đố</label>
+                            <label className="form-label">Hình thức thể hiện (Genre)</label>
                             <div className="category-grid">
                                 {[
-                                    { value: 'History-Lit', label: '📜 Lịch sử - Văn học' },
-                                    { value: 'Acrostic', label: '🔠 Mật mã chữ đầu' },
-                                    { value: 'Modern-Meme', label: '⚡ Meme - Trẻ trung' },
-                                    { value: 'Music-Art', label: '🎨 Nghệ thuật - Nhạc' },
-                                    { value: 'Science-Math', label: '📐 Khoa học - Toán' }
+                                    { value: 'History-Lit', label: '📜 Thơ tự sự / Văn xuôi' },
+                                    { value: 'Acrostic', label: '🔠 Mật mã chữ đầu (Acrostic)' },
+                                    { value: 'Modern-Meme', label: '⚡ Câu đố dí dỏm / Meme' },
+                                    { value: 'Music-Art', label: '🎨 Nghệ thuật & Âm nhạc' },
+                                    { value: 'Science-Math', label: '📐 Đố vui logic / Hình ảnh' }
                                 ].map((item) => (
                                     <label key={item.value} className="pill-option">
                                         <input 
@@ -251,7 +370,11 @@ export default function Generator({ currentUserId, onSaveRiddle, isLoggedIn, onR
                             
                             <div className="riddle-content-block">
                                 <div className="riddle-text">
-                                    {riddle.content?.raw_text}
+                                    {riddle.content?.rendered_html ? (
+                                        <div dangerouslySetInnerHTML={{ __html: riddle.content.rendered_html }} />
+                                    ) : (
+                                        <div style={{ whiteSpace: 'pre-wrap' }}>{riddle.content?.raw_text}</div>
+                                    )}
                                 </div>
                             </div>
                             
@@ -308,7 +431,7 @@ export default function Generator({ currentUserId, onSaveRiddle, isLoggedIn, onR
                                     )}
                                 </button>
                                 <button 
-                                    onClick={() => window.print()} 
+                                    onClick={() => handlePrintSingle(riddle)} 
                                     className="btn-action"
                                     type="button"
                                 >

@@ -40,7 +40,7 @@ export default function Library({ libraryRiddles, onDeleteRiddle }) {
         // Fallback to local HTML generation for printing
         const printWindow = window.open('', '_blank');
         const riddleText = riddle.content?.raw_text || riddle.riddle_content || '';
-        const htmlContent = riddleText.replace(/\n/g, '<br/>');
+        const htmlContent = riddle.content?.rendered_html || riddleText.replace(/\n/g, '<br/>');
         const genreLabel = translateGenre(riddle.metadata?.genre || riddle.genre);
         const ageLabel = riddle.metadata?.age_group || riddle.age_group;
         const hint1Text = riddle.content?.hints?.[0] || riddle.hints?.[0] || 'Không có gợi ý';
@@ -135,11 +135,11 @@ export default function Library({ libraryRiddles, onDeleteRiddle }) {
 
     const translateGenre = (g) => {
         switch (g) {
-            case 'History-Lit': return '📜 Lịch sử - Văn học';
-            case 'Acrostic': return '🔠 Mật mã chữ đầu';
-            case 'Modern-Meme': return '⚡ Meme - Trẻ trung';
-            case 'Music-Art': return '🎨 Nghệ thuật - Nhạc';
-            case 'Science-Math': return '📐 Khoa học - Toán';
+            case 'History-Lit': return '📜 Thơ tự sự / Văn xuôi';
+            case 'Acrostic': return '🔠 Mật mã chữ đầu (Acrostic)';
+            case 'Modern-Meme': return '⚡ Câu đố dí dỏm / Meme';
+            case 'Music-Art': return '🎨 Nghệ thuật & Âm nhạc';
+            case 'Science-Math': return '📐 Đố vui logic / Hình ảnh';
             default: return '🧩 Câu đố';
         }
     };
@@ -176,8 +176,12 @@ export default function Library({ libraryRiddles, onDeleteRiddle }) {
 
                                 <div className="card-body">
                                     <div className="card-riddle-preview">
-                                         {riddleContentText}
-                                     </div>
+                                        {riddle.content?.rendered_html ? (
+                                            <div dangerouslySetInnerHTML={{ __html: riddle.content.rendered_html }} />
+                                        ) : (
+                                            <div style={{ whiteSpace: 'pre-wrap' }}>{riddleContentText}</div>
+                                        )}
+                                    </div>
 
                                     {/* Clues & Answer reveals */}
                                     <div className="interactive-reveals" style={{ marginTop: 'auto' }}>

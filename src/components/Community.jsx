@@ -56,11 +56,11 @@ export default function Community({ riddles, onUpvoteRiddle, onSaveRiddle, saved
 
     const translateGenre = (g) => {
         switch (g) {
-            case 'History-Lit': return '📜 Lịch sử - Văn học';
-            case 'Acrostic': return '🔠 Mật mã chữ đầu';
-            case 'Modern-Meme': return '⚡ Meme - Trẻ trung';
-            case 'Music-Art': return '🎨 Nghệ thuật - Nhạc';
-            case 'Science-Math': return '📐 Khoa học - Toán';
+            case 'History-Lit': return '📜 Thơ tự sự / Văn xuôi';
+            case 'Acrostic': return '🔠 Mật mã chữ đầu (Acrostic)';
+            case 'Modern-Meme': return '⚡ Câu đố dí dỏm / Meme';
+            case 'Music-Art': return '🎨 Nghệ thuật & Âm nhạc';
+            case 'Science-Math': return '📐 Đố vui logic / Hình ảnh';
             default: return '🧩 Câu đố';
         }
     };
@@ -130,7 +130,11 @@ export default function Community({ riddles, onUpvoteRiddle, onSaveRiddle, saved
 
                                 <div className="card-body">
                                     <div className="card-riddle-preview">
-                                        {riddleContentText}
+                                        {riddle.content?.rendered_html ? (
+                                            <div dangerouslySetInnerHTML={{ __html: riddle.content.rendered_html }} />
+                                        ) : (
+                                            <div style={{ whiteSpace: 'pre-wrap' }}>{riddleContentText}</div>
+                                        )}
                                     </div>
 
                                     {/* Clue Reveals */}
