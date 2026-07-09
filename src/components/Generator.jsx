@@ -7,7 +7,7 @@ export default function Generator({ currentUserId, onSaveRiddle, isLoggedIn, onR
     const [ageGroup, setAgeGroup] = useState('Cấp 1');
     const [genre, setGenre] = useState('Acrostic');
     const [topic, setTopic] = useState('Địa lý');
-    const [lang, setLang] = useState('vi');
+    const lang = 'vi';
     
     // UI States
     const [loading, setLoading] = useState(false);
@@ -307,31 +307,7 @@ export default function Generator({ currentUserId, onSaveRiddle, isLoggedIn, onR
                                 ))}
                             </div>
                         </div>
-                        
-                        {/* Language */}
-                        <div className="form-group">
-                            <label className="form-label">Ngôn ngữ câu đố</label>
-                            <div className="options-pill-grid">
-                                <label className="pill-option">
-                                    <input 
-                                        type="radio" 
-                                        name="lang-option" 
-                                        checked={lang === 'vi'}
-                                        onChange={() => setLang('vi')}
-                                    />
-                                    <span className="pill-text">🇻🇳 Tiếng Việt</span>
-                                </label>
-                                <label className="pill-option">
-                                    <input 
-                                        type="radio" 
-                                        name="lang-option" 
-                                        checked={lang === 'en'}
-                                        onChange={() => setLang('en')}
-                                    />
-                                    <span className="pill-text">🇺🇸 English</span>
-                                </label>
-                            </div>
-                        </div>
+
                         
                         <button type="submit" disabled={loading} className="btn-generate">
                             ⚡ Tạo Câu Đố Với AI
