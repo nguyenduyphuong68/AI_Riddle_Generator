@@ -2,7 +2,7 @@
    AI Riddle Generator - AWS API Gateway Fetch Client Service (Robust Proxy Guard)
    ========================================================================== */
 
-// Base Stage URL (e.g. "https://44vwnl4k95.execute-api.ap-southeast-1.amazonaws.com/dev")
+// Base Stage URL (e.g. "https://aykli87i0k.execute-api.ap-southeast-1.amazonaws.com/dev")
 const BASE_API_URL = import.meta.env.REACT_APP_API_URL || '';
 const CLEAN_BASE_URL = BASE_API_URL.replace(/\/+$/, '');
 
