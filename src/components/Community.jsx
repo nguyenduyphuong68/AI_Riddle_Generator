@@ -14,9 +14,14 @@ export default function Community({ riddles, onUpvoteRiddle, onSaveRiddle, saved
         .filter(r => r.GSI1PK) // Must be featured
         .filter(r => {
             if (genreFilter === 'ALL') return true;
-            return r.genre.toUpperCase() === genreFilter.toUpperCase();
+            const itemGenre = r.metadata?.genre || r.genre || '';
+            return itemGenre.toUpperCase() === genreFilter.toUpperCase();
         })
-        .sort((a, b) => b.upvotes - a.upvotes); // Sorted by upvotes descending
+        .sort((a, b) => {
+            const upvotesA = a.community?.upvotes ?? a.upvotes ?? 0;
+            const upvotesB = b.community?.upvotes ?? b.upvotes ?? 0;
+            return upvotesB - upvotesA;
+        }); // Sorted by upvotes descending
 
     const handleGuess = (riddleId, actualAnswer) => {
         const userGuess = (guesses[riddleId] || '').trim().toLowerCase();
@@ -51,11 +56,11 @@ export default function Community({ riddles, onUpvoteRiddle, onSaveRiddle, saved
 
     const translateGenre = (g) => {
         switch (g) {
-            case 'History-Lit': return '📜 Lịch sử - Văn học';
-            case 'Acrostic': return '🔠 Mật mã chữ đầu';
-            case 'Modern-Meme': return '⚡ Meme - Trẻ trung';
-            case 'Music-Art': return '🎨 Nghệ thuật - Nhạc';
-            case 'Science-Math': return '📐 Khoa học - Toán';
+            case 'History-Lit': return '📜 Thơ tự sự / Văn xuôi';
+            case 'Acrostic': return '🔠 Mật mã chữ đầu (Acrostic)';
+            case 'Modern-Meme': return '⚡ Câu đố dí dỏm / Meme';
+            case 'Music-Art': return '🎨 Nghệ thuật & Âm nhạc';
+            case 'Science-Math': return '📐 Đố vui logic / Hình ảnh';
             default: return '🧩 Câu đố';
         }
     };
@@ -94,31 +99,42 @@ export default function Community({ riddles, onUpvoteRiddle, onSaveRiddle, saved
             ) : (
                 <div className="cards-grid">
                     {featuredRiddles.map(riddle => {
-                        const isSaved = savedRiddles.some(sr => sr.riddle_content === riddle.riddle_content);
+                        const riddleContentText = riddle.content?.raw_text || riddle.riddle_content;
+                        const isSaved = savedRiddles.some(sr => (sr.content?.raw_text || sr.riddle_content) === riddleContentText);
                         const feedback = feedbacks[riddle.riddle_id];
                         
                         // Check if this riddle is upvoted by the active user PK
                         const locallyLiked = DynamoDBClient.hasUserLiked(currentUserId, riddle.riddle_id);
+                        const upvotesCount = riddle.community?.upvotes ?? riddle.upvotes ?? 0;
 
                         return (
                             <div key={riddle.riddle_id} className="glass-panel riddle-card">
                                 <div className="card-header">
                                     <div className="tag-list">
-                                        <span className="badge tag-primary">{translateGenre(riddle.genre)}</span>
-                                        <span className="badge tag-accent">{riddle.age_group}</span>
+                                        <span className="badge tag-primary">{translateGenre(riddle.metadata?.genre || riddle.genre)}</span>
+                                        <span className="badge tag-accent">{riddle.metadata?.age_group || riddle.age_group}</span>
+                                        {(riddle.metadata?.topic) && (
+                                            <span className="badge tag-info" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                                                📚 {riddle.metadata.topic}
+                                            </span>
+                                        )}
                                     </div>
                                     <button 
                                         onClick={() => onUpvoteRiddle(riddle.riddle_id)}
                                         className={`upvote-badge ${locallyLiked ? 'liked' : ''}`}
                                         title="Bấm để bình chọn câu đố hay"
                                     >
-                                        👍 <span>{riddle.upvotes}</span>
+                                        👍 <span>{upvotesCount}</span>
                                     </button>
                                 </div>
 
                                 <div className="card-body">
                                     <div className="card-riddle-preview">
-                                        {riddle.riddle_content}
+                                        {riddle.content?.rendered_html ? (
+                                            <div dangerouslySetInnerHTML={{ __html: riddle.content.rendered_html }} />
+                                        ) : (
+                                            <div style={{ whiteSpace: 'pre-wrap' }}>{riddleContentText}</div>
+                                        )}
                                     </div>
 
                                     {/* Clue Reveals */}
@@ -135,7 +151,7 @@ export default function Community({ riddles, onUpvoteRiddle, onSaveRiddle, saved
                                                 className="reveal-content"
                                                 style={{ maxHeight: openReveals[`${riddle.riddle_id}_hint1`] ? '120px' : '0' }}
                                             >
-                                                {riddle.hints[0]}
+                                                {riddle.content?.hints?.[0] || riddle.hints?.[0]}
                                             </div>
                                         </div>
 
@@ -151,7 +167,7 @@ export default function Community({ riddles, onUpvoteRiddle, onSaveRiddle, saved
                                                 className="reveal-content"
                                                 style={{ maxHeight: openReveals[`${riddle.riddle_id}_hint2`] ? '120px' : '0' }}
                                             >
-                                                {riddle.hints[1] || riddle.hints[0]}
+                                                {riddle.content?.hints?.[1] || riddle.hints?.[1] || riddle.content?.hints?.[0] || riddle.hints?.[0]}
                                             </div>
                                         </div>
                                     </div>

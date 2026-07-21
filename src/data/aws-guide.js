@@ -38,7 +38,7 @@ export const singleTableVisualSchema = `
 export const lambdaPythonCode = `import json
 import boto3
 import uuid
-import os
+from datetime import datetime
 
 # Initialize Bedrock & DynamoDB clients
 bedrock = boto3.client(service_name="bedrock-runtime", region_name="us-east-1")
@@ -69,11 +69,11 @@ def lambda_handler(event, context):
         
     try:
         body = json.loads(event.get("body", "{}"))
-        user_id = body.get("userId", "u102")
+        user_id = body.get("userId") or body.get("user_id") or "u102"
         keyword = body.get("keyword", "").strip()
         age_group = body.get("age_group", "Cấp 1")
         genre = body.get("genre", "Acrostic")
-        lang = body.get("lang", "vi")
+        lang = body.get("lang") or body.get("language") or "vi"
         
         if not keyword:
             return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": "Keyword is required"})}
@@ -110,7 +110,7 @@ def lambda_handler(event, context):
         }
         
         response = bedrock.invoke_model(
-            modelId="anthropic.claude-3-5-sonnet-20240620-v1:0",
+            modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
             body=json.dumps(prompt_config)
         )
         response_body = json.loads(response.get("body").read().decode("utf-8"))
@@ -126,7 +126,7 @@ def lambda_handler(event, context):
             "SK": f"RIDDLE#{genre_upper}#{riddle_id}",
             "EntityType": "RIDDLE",
             "GSI1PK": f"FEATURED#{genre_upper}",
-            "GSI1SK": 0,
+            "GSI1SK": "0",
             "riddle_id": riddle_id,
             "keyword": keyword,
             "age_group": age_group,
@@ -134,7 +134,7 @@ def lambda_handler(event, context):
             "riddle_content": riddle_data.get("riddle"),
             "hints": [riddle_data.get("hint1"), riddle_data.get("hint2")],
             "upvotes": 0,
-            "created_at": os.popen('date -Iseconds').read().strip() # ISO timestamp
+            "created_at": datetime.utcnow().isoformat() + "Z" # ISO timestamp
         }
         
         table.put_item(Item=riddle_item)
@@ -145,6 +145,9 @@ def lambda_handler(event, context):
             "body": json.dumps(riddle_item)
         }
     except Exception as e:
+        print("ERROR:", str(e))
+        import traceback
+        traceback.print_exc()
         return {
             "statusCode": 500,
             "headers": headers,
@@ -216,6 +219,186 @@ export async function upvoteRiddleTransaction(userId, creatorId, genre, riddleId
     }
 }
 `;
+
+export const lambdaLibraryCode = `import json
+import boto3
+from datetime import datetime
+from boto3.dynamodb.conditions import Key
+
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table("AI_Riddle_SingleTable")
+
+def lambda_handler(event, context):
+    """
+    AWS Lambda Handler for Managing User Riddle Library.
+    Supports:
+    - GET /riddles/library?userId=...  => Query user's saved riddles
+    - POST /riddles/library            => Save a new riddle to library
+    - DELETE /riddles/library?userId=...&riddleId=... => Delete a riddle
+    """
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key",
+        "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS"
+    }
+
+    http_method = event.get("httpMethod")
+    if http_method == "OPTIONS":
+        return {"statusCode": 200, "headers": headers, "body": json.dumps({"status": "CORS OK"})}
+
+    try:
+        if http_method == "GET":
+            query_params = event.get("queryStringParameters") or {}
+            user_id = query_params.get("userId")
+            if not user_id:
+                return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": "Missing userId"})}
+            
+            # Query DynamoDB Table by PK
+            response = table.query(
+                KeyConditionExpression=Key("PK").eq(f"USER#{user_id}") & Key("SK").begins_with("RIDDLE#")
+            )
+            items = response.get("Items", [])
+            
+            riddles = []
+            for item in items:
+                riddles.append({
+                    "PK": item.get("PK"),
+                    "SK": item.get("SK"),
+                    "riddle_id": item.get("riddle_id"),
+                    "keyword": item.get("keyword"),
+                    "metadata": {
+                        "age_group": item.get("age_group"),
+                        "genre": item.get("genre"),
+                        "topic": item.get("topic", "Địa lý"),
+                        "language": item.get("language", "vi")
+                    },
+                    "content": {
+                        "raw_text": item.get("riddle_content"),
+                        "rendered_html": f"<p>{item.get('riddle_content').replace(chr(10), '<br>')}</p>",
+                        "hints": item.get("hints", [])
+                    },
+                    "community": {
+                        "created_by": user_id,
+                        "creator_role": "Teacher",
+                        "is_public": True,
+                        "upvotes": int(item.get("upvotes", 0))
+                    }
+                })
+            return {"statusCode": 200, "headers": headers, "body": json.dumps(riddles)}
+
+        elif http_method == "POST":
+            body = json.loads(event.get("body", "{}"))
+            user_id = body.get("userId")
+            riddle = body.get("riddle")
+            if not user_id or not riddle:
+                return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": "Missing userId or riddle"})}
+            
+            # Robust hybrid parser for nested or flat formats
+            metadata = riddle.get("metadata") if isinstance(riddle.get("metadata"), dict) else {}
+            content = riddle.get("content") if isinstance(riddle.get("content"), dict) else {}
+            community = riddle.get("community") if isinstance(riddle.get("community"), dict) else {}
+            sys_timestamps = riddle.get("sys_timestamps") if isinstance(riddle.get("sys_timestamps"), dict) else {}
+
+            genre = metadata.get("genre") or riddle.get("genre") or "ACROSTIC"
+            genre_upper = genre.upper()
+            riddle_id = riddle.get("riddle_id")
+            
+            riddle_item = {
+                "PK": f"USER#{user_id}",
+                "SK": f"RIDDLE#{genre_upper}#{riddle_id}",
+                "EntityType": "RIDDLE",
+                "GSI1PK": f"FEATURED#{genre_upper}",
+                "GSI1SK": str(community.get("upvotes") or riddle.get("upvotes") or 0),
+                "riddle_id": riddle_id,
+                "keyword": riddle.get("keyword"),
+                "age_group": metadata.get("age_group") or riddle.get("age_group"),
+                "genre": genre,
+                "riddle_content": content.get("raw_text") or riddle.get("riddle_content"),
+                "hints": content.get("hints") or riddle.get("hints") or [],
+                "upvotes": int(community.get("upvotes") or riddle.get("upvotes") or 0),
+                "created_at": sys_timestamps.get("created_at") or riddle.get("created_at") or ""
+            }
+            
+            table.put_item(Item=riddle_item)
+            return {"statusCode": 200, "headers": headers, "body": json.dumps({"success": True})}
+
+        elif http_method == "DELETE":
+            query_params = event.get("queryStringParameters") or {}
+            user_id = query_params.get("userId")
+            riddle_id = query_params.get("riddleId")
+            if not user_id or not riddle_id:
+                return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": "Missing userId or riddleId"})}
+            
+            response = table.query(
+                KeyConditionExpression=Key("PK").eq(f"USER#{user_id}") & Key("SK").begins_with("RIDDLE#")
+            )
+            items = response.get("Items", [])
+            target_sk = None
+            for item in items:
+                if item.get("riddle_id") == riddle_id:
+                    target_sk = item.get("SK")
+                    break
+            
+            if target_sk:
+                table.delete_item(Key={"PK": f"USER#{user_id}", "SK": target_sk})
+                return {"statusCode": 200, "headers": headers, "body": json.dumps({"success": True})}
+            else:
+                return {"statusCode": 404, "headers": headers, "body": json.dumps({"error": "Riddle not found"})}
+
+    except Exception as e:
+        print("ERROR:", str(e))
+        import traceback
+        traceback.print_exc()
+        return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)})}
+`;
+
+export const lambdaProfileCode = `import json
+import boto3
+from datetime import datetime
+
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table("AI_Riddle_SingleTable")
+
+def lambda_handler(event, context):
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key",
+        "Access-Control-Allow-Methods": "POST,OPTIONS"
+    }
+
+    http_method = event.get("httpMethod")
+    if http_method == "OPTIONS":
+        return {"statusCode": 200, "headers": headers, "body": json.dumps({"status": "CORS OK"})}
+
+    try:
+        if http_method == "POST":
+            body = json.loads(event.get("body", "{}"))
+            user_id = body.get("userId")
+            profile = body.get("profile") or {}
+            
+            if not user_id or not profile:
+                return {"statusCode": 400, "headers": headers, "body": json.dumps({"error": "Missing userId or profile"})}
+            
+            profile_item = {
+                "PK": f"USER#{user_id}",
+                "SK": "PROFILE",
+                "EntityType": "USER",
+                "Name": profile.get("name"),
+                "Email": profile.get("email"),
+                "Role": profile.get("role", "Teacher"),
+                "created_at": datetime.utcnow().isoformat() + "Z"
+            }
+            table.put_item(Item=profile_item)
+            return {"statusCode": 200, "headers": headers, "body": json.dumps({"success": True})}
+
+    except Exception as e:
+        print("ERROR:", str(e))
+        import traceback
+        traceback.print_exc()
+        return {"statusCode": 500, "headers": headers, "body": json.dumps({"error": str(e)})}
+`;
+
+
 
 export const awsSetupSteps = [
     {

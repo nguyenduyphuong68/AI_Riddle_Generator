@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { DynamoDBClient } from '../data/db';
+import { CognitoService } from '../data/auth';
 
 export default function CognitoAuth({ onLogin, onRegister }) {
-    const [tab, setTab] = useState('login'); // login | register
+    const [tab, setTab] = useState('login'); // login | register | confirm
     
     // Form inputs state
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [name, setName] = useState('');
     const [role, setRole] = useState('Teacher'); // Teacher | Parent
+    const [codeArray, setCodeArray] = useState(['', '', '', '', '', '']);
+    const inputRefs = React.useRef([]);
     
     // Feedback alerts
     const [error, setError] = useState('');
@@ -16,29 +19,55 @@ export default function CognitoAuth({ onLogin, onRegister }) {
 
     const demoProfiles = DynamoDBClient.getProfiles();
 
-    const handleLoginSubmit = (e) => {
+    const handleLoginSubmit = async (e) => {
         e.preventDefault();
         setError('');
+        setSuccess('');
         
         if (!email || !password) {
             setError('Vui lòng nhập đầy đủ Email và Mật khẩu!');
             return;
         }
 
-        // Find profile matching email (case-insensitive)
-        const match = demoProfiles.find(p => p.Email.toLowerCase() === email.trim().toLowerCase());
-        
-        if (match) {
-            setSuccess('Đăng nhập thành công!');
-            setTimeout(() => {
-                onLogin(match.PK.replace('USER#', ''));
-            }, 800);
-        } else {
-            setError('Không tìm thấy tài khoản với email này trong hệ thống Cognito!');
+        try {
+            if (CognitoService.isConfigured()) {
+                setSuccess('Đang xác thực với AWS Cognito...');
+                const authData = await CognitoService.signIn(email, password);
+                const idToken = authData.AuthenticationResult.IdToken;
+                const user = CognitoService.decodeIdToken(idToken);
+                
+                if (user) {
+                    // Dynamically register in LocalStorage DB to keep user session synced with frontend data
+                    onRegister(user.name, user.email, user.role, user.userId); 
+                    setSuccess(`Đăng nhập thành công! Chào mừng ${user.name}.`);
+                    setTimeout(() => {
+                        onLogin(user.userId);
+                    }, 800);
+                } else {
+                    setError('Không thể giải mã dữ liệu token từ Cognito!');
+                }
+            } else {
+                // Fallback to mock profiles
+                const match = demoProfiles.find(p => p.Email.toLowerCase() === email.trim().toLowerCase());
+                if (match) {
+                    setSuccess('Đăng nhập thành công!');
+                    setTimeout(() => {
+                        onLogin(match.PK.replace('USER#', ''));
+                    }, 800);
+                } else {
+                    setError('Không tìm thấy tài khoản mẫu với email này. Vui lòng bật tab Developer Hub để cấu hình AWS Cognito thật!');
+                }
+            }
+        } catch (err) {
+            let msg = err.message || 'Đăng nhập thất bại!';
+            if (msg.includes('USER_PASSWORD_AUTH flow not enabled')) {
+                msg = 'Lỗi cấu hình Cognito: Bạn cần kích hoạt dòng chảy "USER_PASSWORD_AUTH" trong App Client trên AWS Console (Xem hướng dẫn chi tiết ở dưới).';
+            }
+            setError(msg);
         }
     };
 
-    const handleRegisterSubmit = (e) => {
+    const handleRegisterSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setSuccess('');
@@ -48,20 +77,113 @@ export default function CognitoAuth({ onLogin, onRegister }) {
             return;
         }
 
-        if (password.length < 6) {
-            setError('Mật khẩu tối thiểu phải từ 6 ký tự!');
+        const minLength = CognitoService.isConfigured() ? 8 : 6;
+        if (password.length < minLength) {
+            setError(`Mật khẩu tối thiểu phải từ ${minLength} ký tự!`);
             return;
         }
 
-        // Call database register
-        const res = onRegister(name, email, role);
-        if (res.success) {
-            setSuccess('Đăng ký thành công! Đang thiết lập JWT Token...');
+        try {
+            if (CognitoService.isConfigured()) {
+                setSuccess('Đang đăng ký tài khoản trên AWS Cognito...');
+                await CognitoService.signUp(email, password, name, role);
+                setSuccess('Đăng ký thành công! Một mã xác thực đã được gửi về email của bạn. Vui lòng điền mã để kích hoạt tài khoản.');
+                // Switch to confirm tab but keep email to use in confirm request
+                setTimeout(() => {
+                    setTab('confirm');
+                    setSuccess('');
+                }, 1500);
+            } else {
+                // Fallback to mock register
+                const res = onRegister(name, email, role);
+                if (res.success) {
+                    setSuccess('Đăng ký thành công! Đang thiết lập JWT Token...');
+                    setTimeout(() => {
+                        onLogin(res.user.PK.replace('USER#', ''));
+                    }, 1000);
+                } else {
+                    setError(res.error || 'Có lỗi xảy ra trong quá trình đăng ký!');
+                }
+            }
+        } catch (err) {
+            let msg = err.message || 'Đăng ký tài khoản thất bại!';
+            // Translate Cognito password policy errors to Vietnamese
+            if (msg.includes('Password did not conform with policy')) {
+                let subMsg = '';
+                if (msg.includes('uppercase characters')) {
+                    subMsg = 'cần có ít nhất 1 chữ viết hoa';
+                } else if (msg.includes('lowercase characters')) {
+                    subMsg = 'cần có ít nhất 1 chữ viết thường';
+                } else if (msg.includes('numeric characters')) {
+                    subMsg = 'cần có ít nhất 1 chữ số';
+                } else if (msg.includes('symbol characters')) {
+                    subMsg = 'cần có ít nhất 1 ký tự đặc biệt (ví dụ: @, #, $, ...)';
+                } else {
+                    subMsg = 'phải tuân theo chính sách mật khẩu bảo mật (chữ hoa, chữ thường, số, ký tự đặc biệt)';
+                }
+                msg = `Mật khẩu không đáp ứng tiêu chuẩn bảo mật của Cognito: Mật khẩu ${subMsg}.`;
+            } else if (msg.includes('at least 8 characters')) {
+                msg = 'Mật khẩu phải dài tối thiểu 8 ký tự.';
+            } else if (msg.includes('An account with the given email already exists')) {
+                msg = 'Tài khoản email này đã được đăng ký trước đó trên Cognito!';
+            } else if (msg.includes('Username should be an email')) {
+                msg = 'Địa chỉ email đăng ký không hợp lệ!';
+            }
+            setError(msg);
+        }
+    };
+
+    const handleCodeChange = (index, value) => {
+        const val = value.replace(/\D/g, ''); // keep only digits
+        const newCode = [...codeArray];
+        newCode[index] = val.slice(-1); // only keep last digit
+        setCodeArray(newCode);
+
+        // Auto-focus next input
+        if (val && index < 5) {
+            inputRefs.current[index + 1].focus();
+        }
+    };
+
+    const handleKeyDown = (index, e) => {
+        if (e.key === 'Backspace' && !codeArray[index] && index > 0) {
+            inputRefs.current[index - 1].focus();
+        }
+    };
+
+    const handlePaste = (e) => {
+        e.preventDefault();
+        const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+        if (pastedData.length === 6) {
+            const newCode = pastedData.split('');
+            setCodeArray(newCode);
+            inputRefs.current[5].focus();
+        }
+    };
+
+    const handleConfirmSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setSuccess('');
+
+        const verificationCode = codeArray.join('');
+        if (verificationCode.length !== 6 || !/^\d+$/.test(verificationCode)) {
+            setError('Mã xác thực phải chứa đúng 6 chữ số!');
+            return;
+        }
+
+        try {
+            setSuccess('Đang kích hoạt tài khoản trên Cognito...');
+            await CognitoService.confirmSignUp(email, verificationCode);
+            setSuccess('Kích hoạt tài khoản thành công! Bạn có thể đăng nhập ngay bây giờ.');
             setTimeout(() => {
-                onLogin(res.user.PK.replace('USER#', ''));
-            }, 1000);
-        } else {
-            setError(res.error || 'Có lỗi xảy ra trong quá trình đăng ký!');
+                setTab('login');
+                setSuccess('');
+                setPassword('');
+                setCodeArray(['', '', '', '', '', '']);
+            }, 2000);
+        } catch (err) {
+            setError(err.message || 'Kích hoạt tài khoản thất bại! Vui lòng thử lại.');
         }
     };
 
@@ -87,51 +209,53 @@ export default function CognitoAuth({ onLogin, onRegister }) {
             </div>
 
             {/* Tab Switches */}
-            <div className="options-pill-grid" style={{ marginBottom: '2rem' }}>
-                <button 
-                    onClick={() => { setTab('login'); setError(''); setSuccess(''); }}
-                    className="nav-link"
-                    style={{ 
-                        flex: 1, 
-                        justifyContent: 'center', 
-                        background: tab === 'login' ? 'linear-gradient(135deg, var(--primary), var(--primary-hover))' : 'var(--bg-surface-solid)',
-                        color: tab === 'login' ? 'white' : 'var(--text-muted)',
-                        border: '1px solid var(--border-color)',
-                        padding: '0.75rem'
-                    }}
-                >
-                    🔑 Đăng nhập
-                </button>
-                <button 
-                    onClick={() => { setTab('register'); setError(''); setSuccess(''); }}
-                    className="nav-link"
-                    style={{ 
-                        flex: 1, 
-                        justifyContent: 'center', 
-                        background: tab === 'register' ? 'linear-gradient(135deg, var(--primary), var(--primary-hover))' : 'var(--bg-surface-solid)',
-                        color: tab === 'register' ? 'white' : 'var(--text-muted)',
-                        border: '1px solid var(--border-color)',
-                        padding: '0.75rem'
-                    }}
-                >
-                    👤 Đăng ký
-                </button>
-            </div>
+            {tab !== 'confirm' && (
+                <div className="options-pill-grid" style={{ marginBottom: '2rem' }}>
+                    <button 
+                        onClick={() => { setTab('login'); setError(''); setSuccess(''); }}
+                        className="nav-link"
+                        style={{ 
+                            flex: 1, 
+                            justifyContent: 'center', 
+                            background: tab === 'login' ? 'linear-gradient(135deg, var(--primary), var(--primary-hover))' : 'var(--bg-surface-solid)',
+                            color: tab === 'login' ? 'white' : 'var(--text-muted)',
+                            border: '1px solid var(--border-color)',
+                            padding: '0.75rem'
+                        }}
+                    >
+                        🔑 Đăng nhập
+                    </button>
+                    <button 
+                        onClick={() => { setTab('register'); setError(''); setSuccess(''); }}
+                        className="nav-link"
+                        style={{ 
+                            flex: 1, 
+                            justifyContent: 'center', 
+                            background: tab === 'register' ? 'linear-gradient(135deg, var(--primary), var(--primary-hover))' : 'var(--bg-surface-solid)',
+                            color: tab === 'register' ? 'white' : 'var(--text-muted)',
+                            border: '1px solid var(--border-color)',
+                            padding: '0.75rem'
+                        }}
+                    >
+                        👤 Đăng ký
+                    </button>
+                </div>
+            )}
 
             {/* Alert boxes */}
             {error && (
-                <div style={{ padding: '0.75rem 1rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', borderRadius: 'var(--radius-sm)', marginBottom: '1.5rem', fontSize: '0.85rem', fontWeight: 700, borderLeft: '4px solid var(--danger)' }}>
+                <div style={{ padding: '0.75rem 1rem', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', borderRadius: 'var(--radius-sm)', marginBottom: '1.5rem', fontSize: '0.85rem', fontWeight: 700, borderLeft: '4px solid var(--danger)', lineHeight: '1.4' }}>
                     {error}
                 </div>
             )}
             {success && (
-                <div style={{ padding: '0.75rem 1rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', borderRadius: 'var(--radius-sm)', marginBottom: '1.5rem', fontSize: '0.85rem', fontWeight: 700, borderLeft: '4px solid var(--success)' }}>
+                <div style={{ padding: '0.75rem 1rem', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', borderRadius: 'var(--radius-sm)', marginBottom: '1.5rem', fontSize: '0.85rem', fontWeight: 700, borderLeft: '4px solid var(--success)', lineHeight: '1.4' }}>
                     {success}
                 </div>
             )}
 
             {/* Forms rendering */}
-            {tab === 'login' ? (
+            {tab === 'login' && (
                 <form onSubmit={handleLoginSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                     <div className="form-group">
                         <label className="form-label">Địa chỉ Email</label>
@@ -159,43 +283,10 @@ export default function CognitoAuth({ onLogin, onRegister }) {
                         Đăng Nhập Ngay
                     </button>
 
-                    {/* Quick Demo Login Option */}
-                    <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem' }}>
-                        <span style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-                            Hoặc thử nhanh bằng tài khoản mẫu có sẵn:
-                        </span>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            {demoProfiles.map(p => (
-                                <button
-                                    key={p.PK}
-                                    type="button"
-                                    onClick={() => handleQuickLogin(p.PK.replace('USER#', ''))}
-                                    style={{
-                                        display: 'flex',
-                                        justifyContent: 'space-between',
-                                        alignItems: 'center',
-                                        padding: '0.6rem 1rem',
-                                        backgroundColor: 'var(--bg-app)',
-                                        border: '1px solid var(--border-color)',
-                                        borderRadius: 'var(--radius-sm)',
-                                        fontSize: '0.8rem',
-                                        cursor: 'pointer',
-                                        textAlign: 'left',
-                                        fontWeight: 600,
-                                        color: 'var(--text-main)',
-                                        transition: 'var(--transition)'
-                                    }}
-                                    onMouseOver={(e) => e.currentTarget.style.borderColor = 'var(--primary)'}
-                                    onMouseOut={(e) => e.currentTarget.style.borderColor = ''}
-                                >
-                                    <span>👤 {p.Name} ({p.Role === 'Teacher' ? 'Giáo viên' : p.Role === 'Parent' ? 'Phụ huynh' : 'Học sinh'})</span>
-                                    <span style={{ fontSize: '0.75rem', color: 'var(--primary)' }}>Đăng nhập ➔</span>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
                 </form>
-            ) : (
+            )}
+
+            {tab === 'register' && (
                 <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                     <div className="form-group">
                         <label className="form-label">Họ và Tên</label>
@@ -224,7 +315,7 @@ export default function CognitoAuth({ onLogin, onRegister }) {
                         <input 
                             type="password" 
                             className="form-input" 
-                            placeholder="Mật khẩu tối thiểu 6 ký tự" 
+                            placeholder={CognitoService.isConfigured() ? "Tối thiểu 8 ký tự (chữ hoa, chữ thường, số, ký tự đặc biệt)" : "Mật khẩu tối thiểu 6 ký tự"}
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             required
@@ -259,9 +350,89 @@ export default function CognitoAuth({ onLogin, onRegister }) {
                 </form>
             )}
 
+            {tab === 'confirm' && (
+                <form onSubmit={handleConfirmSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                    <div style={{ textAlign: 'center', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: '1.5' }}>
+                        Mã xác thực gồm 6 chữ số đã được gửi đến email <strong>{email}</strong>. Vui lòng nhập mã để kích hoạt tài khoản Cognito.
+                    </div>
+                    <div className="form-group" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                        <label className="form-label" style={{ alignSelf: 'stretch', textAlign: 'center', marginBottom: '0.75rem' }}>Mã Xác Thực (6 chữ số)</label>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', width: '100%' }}>
+                            {codeArray.map((digit, idx) => (
+                                <input
+                                    key={idx}
+                                    ref={(el) => (inputRefs.current[idx] = el)}
+                                    type="text"
+                                    maxLength={1}
+                                    pattern="[0-9]*"
+                                    inputMode="numeric"
+                                    value={digit}
+                                    onChange={(e) => handleCodeChange(idx, e.target.value)}
+                                    onKeyDown={(e) => handleKeyDown(idx, e)}
+                                    onPaste={handlePaste}
+                                    style={{
+                                        width: '3rem',
+                                        height: '3.5rem',
+                                        fontSize: '1.5rem',
+                                        fontWeight: '700',
+                                        textAlign: 'center',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: 'var(--radius-md)',
+                                        backgroundColor: 'var(--bg-surface-solid)',
+                                        color: 'var(--text-main)',
+                                        transition: 'var(--transition)',
+                                        boxShadow: 'var(--shadow-sm)'
+                                    }}
+                                    onFocus={(e) => {
+                                        e.target.style.borderColor = 'var(--primary)';
+                                    }}
+                                    onBlur={(e) => {
+                                        e.target.style.borderColor = 'var(--border-color)';
+                                    }}
+                                    required
+                                />
+                            ))}
+                        </div>
+                    </div>
+                    <button type="submit" className="btn-generate" style={{ marginTop: '0.5rem' }}>
+                        Kích Hoạt Tài Khoản
+                    </button>
+                    <button 
+                        type="button" 
+                        onClick={() => { setTab('login'); setError(''); setSuccess(''); }}
+                        style={{ 
+                            background: 'none', 
+                            border: 'none', 
+                            color: 'var(--primary)', 
+                            fontSize: '0.85rem', 
+                            cursor: 'pointer',
+                            marginTop: '0.5rem',
+                            fontWeight: 700 
+                        }}
+                    >
+                        ← Quay lại Đăng nhập
+                    </button>
+                </form>
+            )}
+
             <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                ℹ️ <em>Tính năng xác thực được giả lập dựa trên cơ chế JWT Token cấp phát từ dịch vụ AWS Cognito.</em>
+                ℹ️ <em>Tính năng xác thực được kết nối trực tiếp với dịch vụ AWS Cognito User Pool.</em>
             </div>
+            
+            {/* Cognito Error Troubleshooting Guide */}
+            {error && error.includes('USER_PASSWORD_AUTH') && (
+                <div style={{ marginTop: '1.5rem', padding: '1rem', backgroundColor: 'var(--bg-surface-solid)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', fontSize: '0.8rem', lineHeight: '1.4' }}>
+                    <strong style={{ color: 'var(--primary)', display: 'block', marginBottom: '0.5rem' }}>🛠️ Cách sửa lỗi USER_PASSWORD_AUTH:</strong>
+                    <ol style={{ margin: 0, paddingLeft: '1.2rem', color: 'var(--text-muted)' }}>
+                        <li>Vào AWS Console ➔ <strong>Cognito</strong> ➔ Chọn User Pool của bạn.</li>
+                        <li>Chuyển sang tab <strong>App integration</strong>.</li>
+                        <li>Cuộn xuống dưới cùng và click vào tên App Client của bạn (ví dụ: <code>React-Client-App</code>).</li>
+                        <li>Ở mục <strong>Authentication flows</strong>, chọn <strong>Edit</strong>.</li>
+                        <li>Tích chọn vào dòng <strong>ALLOW_USER_PASSWORD_AUTH</strong> (hoặc <em>User password-based authentication</em>).</li>
+                        <li>Nhấp <strong>Save changes</strong> để lưu lại và thử đăng nhập lại trên web!</li>
+                    </ol>
+                </div>
+            )}
         </div>
     );
 }

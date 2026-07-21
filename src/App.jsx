@@ -5,6 +5,7 @@ import Community from './components/Community';
 import Library from './components/Library';
 import CognitoAuth from './components/CognitoAuth';
 import { DynamoDBClient } from './data/db';
+import { APIService } from './data/api';
 
 export default function App() {
     // SPA Routing & Theme States
@@ -13,7 +14,7 @@ export default function App() {
 
     // Cognito Authentication States
     const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [currentUserId, setCurrentUserId] = useState('u102');
+    const [currentUserId, setCurrentUserId] = useState('usr_123456');
 
     // Local DB States (reactively sync with LocalStorage DynamoDB simulator)
     const [riddles, setRiddles] = useState([]);
@@ -22,7 +23,22 @@ export default function App() {
     // Hydrate database on mount/login
     useEffect(() => {
         setRiddles(DynamoDBClient.getAllRiddles());
-        setLibraryRiddles(DynamoDBClient.getUserLibrary(currentUserId));
+        
+        const loadLibrary = async () => {
+            if (APIService.isConfigured() && isLoggedIn) {
+                try {
+                    const cloudLibrary = await APIService.fetchUserLibrary(currentUserId);
+                    setLibraryRiddles(cloudLibrary);
+                } catch (err) {
+                    console.error("Failed to load library from AWS:", err);
+                    setLibraryRiddles(DynamoDBClient.getUserLibrary(currentUserId));
+                }
+            } else {
+                setLibraryRiddles(DynamoDBClient.getUserLibrary(currentUserId));
+            }
+        };
+
+        loadLibrary();
     }, [currentUserId, isLoggedIn]);
 
     // Sync theme with DOM attributes
@@ -48,8 +64,17 @@ export default function App() {
         setActiveTab('generator');
     };
 
-    const handleRegister = (name, email, role) => {
-        return DynamoDBClient.registerUser(name, email, role);
+    const handleRegister = async (name, email, role, userId) => {
+        const localResult = DynamoDBClient.registerUser(name, email, role, userId);
+        if (APIService.isConfigured()) {
+            try {
+                await APIService.saveUserProfile(userId, { name, email, role });
+                console.log("Successfully saved user profile to cloud DynamoDB!");
+            } catch (err) {
+                console.error("Failed to save user profile to AWS:", err);
+            }
+        }
+        return localResult;
     };
 
     const handleLoginClick = () => {
@@ -57,13 +82,33 @@ export default function App() {
     };
 
     // Callback: Create/Save Riddle to Library
-    const handleSaveRiddle = (riddleData) => {
+    const handleSaveRiddle = async (riddleData) => {
+        if (APIService.isConfigured()) {
+            try {
+                await APIService.saveRiddleToLibrary(currentUserId, riddleData);
+                const cloudLibrary = await APIService.fetchUserLibrary(currentUserId);
+                setLibraryRiddles(cloudLibrary);
+                return;
+            } catch (err) {
+                console.error("Failed to save to AWS Library, falling back to local:", err);
+            }
+        }
         DynamoDBClient.saveRiddle(currentUserId, riddleData);
         setLibraryRiddles(DynamoDBClient.getUserLibrary(currentUserId));
     };
 
     // Callback: Delete Riddle
-    const handleDeleteRiddle = (riddleId) => {
+    const handleDeleteRiddle = async (riddleId) => {
+        if (APIService.isConfigured()) {
+            try {
+                await APIService.deleteRiddleFromLibrary(currentUserId, riddleId);
+                const cloudLibrary = await APIService.fetchUserLibrary(currentUserId);
+                setLibraryRiddles(cloudLibrary);
+                return;
+            } catch (err) {
+                console.error("Failed to delete from AWS Library, falling back to local:", err);
+            }
+        }
         DynamoDBClient.deleteRiddle(currentUserId, riddleId);
         setLibraryRiddles(DynamoDBClient.getUserLibrary(currentUserId));
     };

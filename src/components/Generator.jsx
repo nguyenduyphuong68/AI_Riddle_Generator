@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { generateMockRiddleText } from '../data/db';
+import { APIService } from '../data/api';
 
-export default function Generator({ onSaveRiddle }) {
+export default function Generator({ currentUserId, onSaveRiddle, isLoggedIn, onRequireLogin }) {
     const [keyword, setKeyword] = useState('');
     const [ageGroup, setAgeGroup] = useState('Cấp 1');
     const [genre, setGenre] = useState('Acrostic');
-    const [lang, setLang] = useState('vi');
+    const [topic, setTopic] = useState('Địa lý');
+    const lang = 'vi';
     
     // UI States
     const [loading, setLoading] = useState(false);
@@ -20,7 +22,7 @@ export default function Generator({ onSaveRiddle }) {
         answer: false
     });
 
-    const handleGenerate = (e) => {
+    const handleGenerate = async (e) => {
         e.preventDefault();
         
         setWelcome(false);
@@ -29,22 +31,40 @@ export default function Generator({ onSaveRiddle }) {
         setSaved(false);
         setReveals({ hint1: false, hint2: false, answer: false });
 
-        // Simulate AI loading duration (1.2 seconds)
-        setTimeout(() => {
-            const rawRiddle = generateMockRiddleText(keyword, ageGroup, genre, lang);
-            
-            const structuredRiddle = {
-                keyword: rawRiddle.keyword || keyword,
-                age_group: ageGroup,
-                genre: genre,
-                riddle_content: rawRiddle.riddle_content,
-                hints: rawRiddle.hints || ["Không có gợi ý"],
-                lang: lang
-            };
+        const payload = {
+            keyword: keyword,
+            age_group: ageGroup,
+            genre: genre,
+            topic: topic,
+            language: lang,
+            user_id: currentUserId,
+            creator_role: isLoggedIn ? 'User' : 'Guest'
+        };
 
-            setRiddle(structuredRiddle);
-            setLoading(false);
-        }, 1200);
+        try {
+            if (APIService.isConfigured()) {
+                console.log("Calling API Gateway: ", APIService.getApiUrl());
+                const response = await APIService.generateRiddle(payload);
+                setRiddle(response);
+            } else {
+                console.warn("API is not configured, running local mock.");
+                setTimeout(() => {
+                    const localRiddle = generateMockRiddleText(keyword, ageGroup, genre, lang, topic);
+                    setRiddle(localRiddle);
+                    setLoading(false);
+                }, 1000);
+                return;
+            }
+        } catch (err) {
+            console.error("API call failed, falling back to local simulation:", err);
+            setTimeout(() => {
+                const localRiddle = generateMockRiddleText(keyword, ageGroup, genre, lang, topic);
+                setRiddle(localRiddle);
+                setLoading(false);
+            }, 1000);
+            return;
+        }
+        setLoading(false);
     };
 
     const toggleReveal = (key) => {
@@ -56,17 +76,142 @@ export default function Generator({ onSaveRiddle }) {
 
     const handleSave = () => {
         if (!riddle || saved) return;
+        if (!isLoggedIn) {
+            const accept = window.confirm("Bạn cần đăng nhập để lưu câu đố này vào thư viện cá nhân. Đăng nhập ngay?");
+            if (accept) onRequireLogin();
+            return;
+        }
         onSaveRiddle(riddle);
         setSaved(true);
     };
 
+    const handlePrintSingle = async (riddleItem) => {
+        try {
+            if (APIService.isConfigured()) {
+                console.log("Triggering backend /riddles/export endpoint from generator...");
+                const result = await APIService.exportRiddle(riddleItem);
+                
+                if (result instanceof Blob) {
+                    const fileURL = URL.createObjectURL(result);
+                    window.open(fileURL, '_blank');
+                    return;
+                } else if (result && typeof result === 'object' && result.download_url) {
+                    window.open(result.download_url, '_blank');
+                    return;
+                } else if (result && typeof result === 'object' && result.rendered_html) {
+                    const printWindow = window.open('', '_blank');
+                    printWindow.document.write(result.rendered_html);
+                    printWindow.document.close();
+                    return;
+                }
+            }
+        } catch (err) {
+            console.error("Export API failed, falling back to local layout rendering:", err);
+        }
+
+        // Fallback to local HTML generation for printing
+        const printWindow = window.open('', '_blank');
+        const riddleText = riddleItem.content?.raw_text || riddleItem.riddle_content || '';
+        const htmlContent = riddleItem.content?.rendered_html || riddleText.replace(/\n/g, '<br/>');
+        const genreLabel = translateGenre(riddleItem.metadata?.genre || riddleItem.genre);
+        const ageLabel = riddleItem.metadata?.age_group || riddleItem.age_group;
+        const hint1Text = riddleItem.content?.hints?.[0] || riddleItem.hints?.[0] || 'Không có gợi ý';
+        const hint2Text = riddleItem.content?.hints?.[1] || riddleItem.hints?.[1] || hint1Text;
+
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+                <head>
+                    <title>AI Riddle - ${riddleItem.keyword}</title>
+                    <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@600;700&family=Plus+Jakarta+Sans:wght@500;700&display=swap" rel="stylesheet">
+                    <style>
+                        body {
+                            font-family: 'Plus Jakarta Sans', sans-serif;
+                            padding: 2cm;
+                            background: white;
+                            color: #1f2937;
+                        }
+                        .riddle-card {
+                            border: 2px solid #7c3aed;
+                            border-radius: 16px;
+                            padding: 1.5cm;
+                            max-width: 15cm;
+                            margin: 0 auto;
+                            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+                        }
+                        .header {
+                            font-size: 9pt;
+                            text-transform: uppercase;
+                            color: #7c3aed;
+                            font-weight: 700;
+                            margin-bottom: 0.5cm;
+                            border-bottom: 1px solid #7c3aed;
+                            padding-bottom: 0.2cm;
+                        }
+                        .riddle-text {
+                            font-family: 'Quicksand', sans-serif;
+                            font-size: 16pt;
+                            line-height: 1.8;
+                            color: #4c1d95;
+                            margin-bottom: 1cm;
+                            text-align: center;
+                        }
+                        .hint-block {
+                            border-top: 1px dashed #ccc;
+                            margin-top: 0.5cm;
+                            padding-top: 0.3cm;
+                            font-size: 10.5pt;
+                            color: #4b5563;
+                            line-height: 1.5;
+                        }
+                        .answer-container {
+                            margin-top: 1cm;
+                            text-align: center;
+                        }
+                        .answer-badge {
+                            display: inline-block;
+                            border: 2px solid #fbbf24;
+                            background-color: #fffbeb;
+                            color: #d97706;
+                            padding: 0.3cm 1cm;
+                            font-size: 13pt;
+                            font-weight: 800;
+                            border-radius: 6px;
+                            text-transform: uppercase;
+                            letter-spacing: 0.05em;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="riddle-card">
+                        <div class="header">AI Riddle Generator &nbsp;•&nbsp; ${genreLabel} &nbsp;•&nbsp; ${ageLabel}</div>
+                        <div class="riddle-text">${htmlContent}</div>
+                        <div class="hint-block"><strong>Gợi ý 1:</strong> ${hint1Text}</div>
+                        <div class="hint-block"><strong>Gợi ý 2:</strong> ${hint2Text}</div>
+                        <div class="answer-container">
+                            <div style="font-size: 9pt; color: #9ca3af; margin-bottom: 4px;">ĐÁP ÁN:</div>
+                            <div class="answer-badge">${riddleItem.keyword}</div>
+                        </div>
+                    </div>
+                    <script>
+                        window.onload = function() {
+                            window.print();
+                            setTimeout(function() { window.close(); }, 500);
+                        }
+                    </script>
+                </body>
+            </html>
+        `);
+        printWindow.document.close();
+    };
+
     const translateGenre = (g) => {
         switch (g) {
-            case 'History-Lit': return '📜 Lịch sử - Văn học';
-            case 'Acrostic': return '🔠 Mật mã chữ đầu';
-            case 'Modern-Meme': return '⚡ Meme - Trẻ trung';
-            case 'Music-Art': return '🎨 Nghệ thuật - Nhạc';
-            case 'Science-Math': return '📐 Khoa học - Toán';
+            case 'History-Lit': return '📜 Thơ tự sự / Văn xuôi';
+            case 'Acrostic': return '🔠 Mật mã chữ đầu (Acrostic)';
+            case 'Modern-Meme': return '⚡ Câu đố dí dỏm / Meme';
+            case 'Music-Art': return '🎨 Nghệ thuật & Âm nhạc';
+            case 'Science-Math': return '📐 Đố vui logic / Hình ảnh';
             default: return '🧩 Câu đố';
         }
     };
@@ -93,6 +238,24 @@ export default function Generator({ onSaveRiddle }) {
                                 onChange={(e) => setKeyword(e.target.value)}
                                 required
                             />
+                        </div>
+
+                        {/* Topic selection dropdown */}
+                        <div className="form-group">
+                            <label htmlFor="topic-select" className="form-label">Chủ đề kiến thức (Topic)</label>
+                            <select 
+                                id="topic-select"
+                                className="form-input"
+                                value={topic}
+                                onChange={(e) => setTopic(e.target.value)}
+                                style={{ fontWeight: 600 }}
+                            >
+                                <option value="Địa lý">🗺️ Địa lý</option>
+                                <option value="Lịch sử">📜 Lịch sử</option>
+                                <option value="Văn học">📚 Văn học</option>
+                                <option value="Toán học">📐 Toán học</option>
+                                <option value="Khoa học">🧪 Khoa học</option>
+                            </select>
                         </div>
                         
                         {/* Age group */}
@@ -122,14 +285,14 @@ export default function Generator({ onSaveRiddle }) {
                         
                         {/* Genre selection */}
                         <div className="form-group">
-                            <label className="form-label">Thể loại câu đố</label>
+                            <label className="form-label">Hình thức thể hiện (Genre)</label>
                             <div className="category-grid">
                                 {[
-                                    { value: 'History-Lit', label: '📜 Lịch sử - Văn học' },
-                                    { value: 'Acrostic', label: '🔠 Mật mã chữ đầu' },
-                                    { value: 'Modern-Meme', label: '⚡ Meme - Trẻ trung' },
-                                    { value: 'Music-Art', label: '🎨 Nghệ thuật - Nhạc' },
-                                    { value: 'Science-Math', label: '📐 Khoa học - Toán' }
+                                    { value: 'History-Lit', label: '📜 Thơ tự sự / Văn xuôi' },
+                                    { value: 'Acrostic', label: '🔠 Mật mã chữ đầu (Acrostic)' },
+                                    { value: 'Modern-Meme', label: '⚡ Câu đố dí dỏm / Meme' },
+                                    { value: 'Music-Art', label: '🎨 Nghệ thuật & Âm nhạc' },
+                                    { value: 'Science-Math', label: '📐 Đố vui logic / Hình ảnh' }
                                 ].map((item) => (
                                     <label key={item.value} className="pill-option">
                                         <input 
@@ -144,31 +307,7 @@ export default function Generator({ onSaveRiddle }) {
                                 ))}
                             </div>
                         </div>
-                        
-                        {/* Language */}
-                        <div className="form-group">
-                            <label className="form-label">Ngôn ngữ câu đố</label>
-                            <div className="options-pill-grid">
-                                <label className="pill-option">
-                                    <input 
-                                        type="radio" 
-                                        name="lang-option" 
-                                        checked={lang === 'vi'}
-                                        onChange={() => setLang('vi')}
-                                    />
-                                    <span className="pill-text">🇻🇳 Tiếng Việt</span>
-                                </label>
-                                <label className="pill-option">
-                                    <input 
-                                        type="radio" 
-                                        name="lang-option" 
-                                        checked={lang === 'en'}
-                                        onChange={() => setLang('en')}
-                                    />
-                                    <span className="pill-text">🇺🇸 English</span>
-                                </label>
-                            </div>
-                        </div>
+
                         
                         <button type="submit" disabled={loading} className="btn-generate">
                             ⚡ Tạo Câu Đố Với AI
@@ -201,13 +340,17 @@ export default function Generator({ onSaveRiddle }) {
                         <div className="riddle-display-wrapper">
                             <div className="riddle-metadata-row">
                                 <div className="riddle-metadata-badge">
-                                    🏷️ {translateGenre(riddle.genre)} &nbsp;•&nbsp; 🎓 {riddle.age_group} &nbsp;•&nbsp; 🌐 {riddle.lang.toUpperCase()}
+                                    🏷️ {translateGenre(riddle.metadata?.genre)} &nbsp;•&nbsp; 🎓 {riddle.metadata?.age_group} &nbsp;•&nbsp; 🌐 {riddle.metadata?.language?.toUpperCase()} &nbsp;•&nbsp; 📚 {riddle.metadata?.topic}
                                 </div>
                             </div>
                             
                             <div className="riddle-content-block">
                                 <div className="riddle-text">
-                                    {riddle.riddle_content}
+                                    {riddle.content?.rendered_html ? (
+                                        <div dangerouslySetInnerHTML={{ __html: riddle.content.rendered_html }} />
+                                    ) : (
+                                        <div style={{ whiteSpace: 'pre-wrap' }}>{riddle.content?.raw_text}</div>
+                                    )}
                                 </div>
                             </div>
                             
@@ -219,7 +362,7 @@ export default function Generator({ onSaveRiddle }) {
                                         <span className="reveal-trigger-arrow">▼</span>
                                     </button>
                                     <div className="reveal-content" style={{ maxHeight: reveals.hint1 ? '200px' : '0' }}>
-                                        {riddle.hints[0]}
+                                        {riddle.content?.hints?.[0]}
                                     </div>
                                 </div>
                                 
@@ -229,7 +372,7 @@ export default function Generator({ onSaveRiddle }) {
                                         <span className="reveal-trigger-arrow">▼</span>
                                     </button>
                                     <div className="reveal-content" style={{ maxHeight: reveals.hint2 ? '200px' : '0' }}>
-                                        {riddle.hints[1] || riddle.hints[0]}
+                                        {riddle.content?.hints?.[1] || riddle.content?.hints?.[0]}
                                     </div>
                                 </div>
                                 
@@ -264,7 +407,7 @@ export default function Generator({ onSaveRiddle }) {
                                     )}
                                 </button>
                                 <button 
-                                    onClick={() => window.print()} 
+                                    onClick={() => handlePrintSingle(riddle)} 
                                     className="btn-action"
                                     type="button"
                                 >
