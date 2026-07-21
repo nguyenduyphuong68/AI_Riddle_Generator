@@ -102,5 +102,107 @@ export const APIService = {
         }
 
         return result;
+    },
+
+    // 3. Fetch User Library (GET)
+    fetchUserLibrary: async (userId) => {
+        if (!CLEAN_BASE_URL) throw new Error("API URL is not configured.");
+        const url = `${CLEAN_BASE_URL}/riddles/library?userId=${encodeURIComponent(userId)}`;
+        
+        console.log("Fetching library from:", url);
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        });
+
+        if (!response.ok) {
+            throw new Error(`API Gateway library fetch error! Status: ${response.status}`);
+        }
+
+        let result = await response.json();
+        
+        // Unwrap Lambda proxy integration nested response if present
+        if (result && typeof result === 'object' && result.statusCode !== undefined && result.body !== undefined) {
+            result = JSON.parse(result.body || '[]');
+        }
+        return result;
+    },
+
+    // 4. Save Riddle to Library (POST)
+    saveRiddleToLibrary: async (userId, riddleData) => {
+        if (!CLEAN_BASE_URL) throw new Error("API URL is not configured.");
+        const url = `${CLEAN_BASE_URL}/riddles/library`;
+
+        const payload = {
+            userId: userId,
+            riddle: riddleData
+        };
+
+        console.log("Saving to library via:", url);
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`API Gateway library save error! Status: ${response.status}`);
+        }
+
+        let result = await response.json();
+        if (result && typeof result === 'object' && result.statusCode !== undefined && result.body !== undefined) {
+            result = JSON.parse(result.body || '{}');
+        }
+        return result;
+    },
+
+    // 5. Delete Riddle from Library (DELETE)
+    deleteRiddleFromLibrary: async (userId, riddleId) => {
+        if (!CLEAN_BASE_URL) throw new Error("API URL is not configured.");
+        const url = `${CLEAN_BASE_URL}/riddles/library?userId=${encodeURIComponent(userId)}&riddleId=${encodeURIComponent(riddleId)}`;
+
+        console.log("Deleting from library via:", url);
+        const response = await fetch(url, {
+            method: 'DELETE',
+            headers: { 'Accept': 'application/json' }
+        });
+
+        if (!response.ok) {
+            throw new Error(`API Gateway library delete error! Status: ${response.status}`);
+        }
+
+        let result = await response.json();
+        if (result && typeof result === 'object' && result.statusCode !== undefined && result.body !== undefined) {
+            result = JSON.parse(result.body || '{}');
+        }
+        return result;
+    },
+
+    // 6. Save User Profile to DynamoDB (POST)
+    saveUserProfile: async (userId, profileData) => {
+        if (!CLEAN_BASE_URL) throw new Error("API URL is not configured.");
+        const url = `${CLEAN_BASE_URL}/riddles/profile`;
+
+        const payload = {
+            userId: userId,
+            profile: profileData
+        };
+
+        console.log("Saving user profile via:", url);
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            throw new Error(`API Gateway profile save error! Status: ${response.status}`);
+        }
+
+        let result = await response.json();
+        if (result && typeof result === 'object' && result.statusCode !== undefined && result.body !== undefined) {
+            result = JSON.parse(result.body || '{}');
+        }
+        return result;
     }
 };

@@ -201,14 +201,21 @@ export const DynamoDBClient = {
         return JSON.parse(localStorage.getItem('amplify_profiles')) || [];
     },
 
-    registerUser: (name, email, role) => {
+    registerUser: (name, email, role, customUserId) => {
         const profiles = DynamoDBClient.getProfiles();
         const existing = profiles.find(p => p.Email.toLowerCase() === email.toLowerCase());
         if (existing) {
-            return { success: false, error: 'Email này đã được đăng ký tài khoản!' };
+            // Update customUserId if it differs to keep local database linked to real Cognito sub UUID
+            if (customUserId && existing.PK !== `USER#${customUserId}`) {
+                existing.PK = `USER#${customUserId}`;
+            }
+            existing.Name = name;
+            existing.Role = role;
+            localStorage.setItem('amplify_profiles', JSON.stringify(profiles));
+            return { success: true, user: existing };
         }
 
-        const newUserId = "usr_" + Math.floor(Math.random() * 1000000);
+        const newUserId = customUserId || ("usr_" + Math.floor(Math.random() * 1000000));
         const newProfile = {
             PK: `USER#${newUserId}`,
             SK: "PROFILE",
